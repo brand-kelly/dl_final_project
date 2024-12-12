@@ -9,7 +9,8 @@ import torch.nn.functional as F
 import numpy as np
 
 try:
-    nltk.data.find("corpora/cmudict.zip")
+    import nltk
+    nltk.data.find("../data/LibriTTS/librispeech-lexicon.txt")
 except:
     nltk.download("cmudict")
 
