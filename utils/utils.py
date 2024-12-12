@@ -92,23 +92,9 @@ class PhonemeVocab:
 def compute_mel_spectrogram(
     dataset, sample_rate=16000, n_mels=80, n_fft=1024, hop_length=256
 ):
-    """
-    Compute the mel-spectrogram for FastSpeech 2.
-
-    Args:
-        dataset (list): List of dictionaries that contain the wav file path.
-        sample_rate (int): Target sample rate (default: 16kHz).
-        n_mels (int): Number of mel bands (default: 80).
-        n_fft (int): FFT size (default: 1024).
-        hop_length (int): Hop length between frames (default: 256).
-
-    Returns:
-        Tensor: Mel-spectrogram of shape (n_mels, time_frames).
-    """
-    # Load the audio
+    
     mel_data = []
 
-    # Create the mel-spectrogram transformation
     mel_spectrogram = torchaudio.transforms.MelSpectrogram(
         sample_rate=sample_rate,
         n_mels=n_mels,
@@ -122,102 +108,62 @@ def compute_mel_spectrogram(
         wav_path = data["wav_path"]
         waveform, sr = torchaudio.load(wav_path)
 
-        # Compute the mel-spectrogram
         mel = mel_spectrogram(waveform)
 
-        # Convert to log scale (log-magnitude spectrogram)
         mel = torchaudio.functional.amplitude_to_DB(
             mel, multiplier=10.0, amin=1e-10, db_multiplier=0.0
         )
         tmp["mel"] = mel.squeeze(0)
         mel_data.append(tmp)
 
-    return mel_data  # Shape: (n_mels, time_frames)
+    return mel_data
 
 
 def extract_energy(wav_path, start_time, end_time, sample_rate=16000):
-    """
-    Extract mean energy (RMS) for a phoneme's duration.
 
-    Args:
-        wav_path (str): Path to the WAV file.
-        start_time (float): Start time of the phoneme (in seconds).
-        end_time (float): End time of the phoneme (in seconds).
-        sample_rate (int): Sample rate of the audio (default: 16kHz).
-
-    Returns:
-        float: RMS energy for the phoneme duration.
-    """
-    # Load the audio
     waveform, sr = torchaudio.load(wav_path)
 
-    # Resample if necessary
     if sr != sample_rate:
         resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)
         waveform = resampler(waveform)
 
-    # Convert time to sample indices
     start_sample = int(start_time * sample_rate)
     end_sample = int(end_time * sample_rate)
 
-    # Extract the relevant segment
     segment = waveform[:, start_sample:end_sample].numpy()
 
-    # Compute RMS energy
     rms_energy = np.sqrt(np.mean(segment**2))
 
     return rms_energy
 
 
 def extract_mean_pitch(pitch, start_time, end_time):
-    """
-    Extract the mean pitch within a specified time range from a WAV file.
-
-    Args:
-        pitch (object): paselmouth object.
-        start_time (float): Start time of the phoneme (in seconds).
-        end_time (float): End time of the phoneme (in seconds).
-
-    Returns:
-        float: Mean pitch (in Hz) within the time range, or None if no pitch detected.
-    """
+    
     pitch = pitch
     selected_pitch = pitch.selected_array["frequency"]
     timestamps = pitch.xs()
 
-    # Filter pitch values within the start and end time
     pitch_values = [
         freq
         for t, freq in zip(timestamps, selected_pitch)
-        if start_time <= t <= end_time and freq > 0  # Exclude unvoiced segments
+        if start_time <= t <= end_time and freq > 0
     ]
 
-    # Return mean pitch, or None if no pitch values are found
     return sum(pitch_values) / len(pitch_values) if pitch_values else None
 
 
 def extract_phoneme_durations(textgrid_path):
-    """
-    Extract phoneme durations from a TextGrid file for FastSpeech 2 training.
 
-    Args:
-        textgrid_path (str): Path to the TextGrid file.
-
-    Returns:
-        list: List of dictionaries containing phoneme, start_time, end_time, and duration.
-    """
-    # Load the TextGrid file
     try:
         tg = TextGrid.fromFile(textgrid_path)
     except:
         return None
-    # Find the "phones" tier
+
     phoneme_tier = tg.getFirst("phones")
     phoneme_durations = []
 
-    # Extract intervals from the "phones" tier
     for interval in phoneme_tier:
-        if interval.mark.strip():  # Skip empty intervals
+        if interval.mark.strip():
             phoneme_durations.append(
                 {
                     "phoneme": interval.mark.strip(),
