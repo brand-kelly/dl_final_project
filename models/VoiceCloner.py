@@ -70,14 +70,14 @@ class VariancePredictor(nn.Module):
         """
         x = x.transpose(
             1, 2
-        )  # (batch_size, d_model, seq_length) -> (batch_size, seq_length, d_model)
+        )  # (batch_size, seq_length, d_model)
         x = self.conv1(x)
         x = self.relu(x)
-        x = self.layer_norm(x.transpose(1, 2))  # Normalize along d_model
+        x = self.layer_norm(x.transpose(1, 2))
         x = self.dropout(x).transpose(1, 2)
         x = self.conv2(x)
         x = self.relu(x)
-        x = self.layer_norm(x.transpose(1, 2))  # Normalize along d_model
+        x = self.layer_norm(x.transpose(1, 2))
         x = self.dropout(x)
         x = self.fc(x).squeeze(2)
         return x
@@ -151,10 +151,10 @@ class VarianceAdaptor(nn.Module):
         pred_durations = self.duration_predictor(encoder_outputs)
 
         expanded_outputs = self.expand_by_duration(
-            encoder_outputs, durations if use_ground_truth else pred_durations
+            encoder_outputs, durations if use_ground_truth else torch.exp(pred_durations) - 1
         )
 
-        pred_pitch = self.pitch_predictor(expanded_outputs)
+        pred_pitch_spectrogram = self.pitch_predictor(expanded_outputs)
         pred_energy = self.energy_predictor(expanded_outputs)
 
         quantized_pitch = self.quantize_pitch(
@@ -182,25 +182,16 @@ class VarianceAdaptor(nn.Module):
             `durations` (torch.Tensor)
 
         Returns:
-            `padded_expanded` (torch.Tensor)
+            `expanded_outputs` (torch.Tensor)
         """
-        expanded = []
-        for i in range(len(encoder_outputs)):
-            valid_durations = durations[i].clamp(min=1).long()
-            repeated = torch.repeat_interleave(
-                encoder_outputs[i], valid_durations, dim=0
-            )
+        expanded = [
+            torch.repeat_interleave(encoder_outputs[i], durations[i].long(), dim=0)
+            for i in range(len(encoder_outputs))
+        ]
+        expanded_outputs = nn.utils.rnn.pad_sequence(expanded, batch_first=True)
 
-            expanded.append(repeated[:400])  # Truncate to max sequence length of 400
-
-        padded_expanded = torch.zeros(
-            len(expanded), 400, encoder_outputs.size(-1), device=encoder_outputs.device
-        )
-        for i, exp in enumerate(expanded):
-            padded_expanded[i, : exp.size(0), :] = exp
-
-        return padded_expanded
-
+        return expanded_outputs
+    
     def quantize_pitch(
         self,
         pitch: torch.Tensor,
@@ -214,15 +205,15 @@ class VarianceAdaptor(nn.Module):
         Args:
             `pitch` (torch.Tensor)
             `num_bins` (int)
-            `min_log_f0` (int)
-            `max_log_f0` (int)
+            `min_pitch` (int)
+            `max_pitch` (int)
         
         Returns:
             `quantized` (torch.Tensor)
         """
-        bins = torch.linspace(min_log_f0, max_log_f0, steps=num_bins).to(pitch.device)
-        quantized = torch.bucketize(pitch, bins)
-        quantized = torch.clamp(quantized, min=0, max=num_bins - 1)
+        log_pitch = torch.log2(pitch.clam(min_pitch, max_pitch)
+        bins = torch.linspace(torch.log2(min_pitch), torchlog2(max_pitch), steps=num_bins)
+        quantized = torch.bucketize(log_pitch, bins)
         return quantized
 
     def quantize_energy(
